@@ -164,13 +164,15 @@
   const startBtn = document.getElementById('startBtn');
   const W = canvas.width, H = canvas.height, ground = 385;
   let running = false, gameOver = false, score = 0, best = 0, speed = 6, frame = 0;
+  // Scale game physics by elapsed time so different phone refresh rates play at the same speed.
+  let lastTimestamp = 0, delta = 1, lastObstacleFrame = 0;
   let obstacles = [], particles = [], clouds = [];
   const player = { x:130, y:ground-58, w:42, h:58, vy:0, onGround:true };
   try { best = Number(localStorage.getItem('runrush-best') || 0); } catch(e) {}
   bestEl.textContent = best;
   for(let i=0;i<6;i++) clouds.push({x:i*190+30,y:45+Math.random()*120,s:.65+Math.random()*.8});
   function reset() {
-    score=0; speed=6; frame=0; obstacles=[]; particles=[];
+    score=0; speed=6; frame=0; lastObstacleFrame=0; obstacles=[]; particles=[];
     player.y=ground-player.h; player.vy=0; player.onGround=true;
     scoreEl.textContent='0'; gameOver=false; running=true; overlay.classList.add('hidden');
   }
@@ -204,7 +206,7 @@
     ctx.fillStyle='#ffffff18';
     for(const c of clouds) {
       ctx.beginPath(); ctx.ellipse(c.x,c.y,34*c.s,13*c.s,0,0,Math.PI*2); ctx.ellipse(c.x+22*c.s,c.y-7*c.s,22*c.s,17*c.s,0,0,Math.PI*2); ctx.ellipse(c.x+42*c.s,c.y,27*c.s,12*c.s,0,0,Math.PI*2); ctx.fill();
-      if(running)c.x-=speed*.18*c.s;
+      if(running)c.x-=speed*.18*c.s*delta;
       if(c.x < -90)c.x=W+50;
     }
     // distant hills
@@ -238,20 +240,28 @@
     roundedRect(o.x+5,o.y+7,o.w-10,5,3,'#ffc0a9');
     ctx.fillStyle='#d64d60';ctx.fillRect(o.x+4,o.y+o.h-7,o.w-8,7);
   }
-  function loop() {
+  function loop(timestamp = 0) {
+    // delta=1 is one 60 Hz frame. Cap large gaps (e.g. switching tabs) to avoid sudden jumps.
+    delta = lastTimestamp ? Math.min((timestamp - lastTimestamp) / (1000 / 60), 2) : 1;
+    lastTimestamp = timestamp;
     drawBackground();
     if(running) {
-      frame++; score += .12; speed=Math.min(12,6+score/150);
-      scoreEl.textContent=Math.floor(score); if(frame%6===0) reportState(score,true);
-      player.vy += .72; player.y += player.vy;
+      frame += delta;
+      score += .12 * delta;
+      speed=Math.min(12,6+score/150);
+      scoreEl.textContent=Math.floor(score);
+      if(Math.floor(frame / 6) !== Math.floor((frame-delta) / 6)) reportState(score,true);
+      player.vy += .72 * delta;
+      player.y += player.vy * delta;
       if(player.y >= ground-player.h) { player.y=ground-player.h; player.vy=0; player.onGround=true; }
-      if(frame%Math.max(42,Math.floor(95-speed*3))===0) spawnObstacle();
-      obstacles.forEach(o=>o.x-=speed);
+      const spawnEvery = Math.max(42,Math.floor(95-speed*3));
+      if(frame - lastObstacleFrame >= spawnEvery) { spawnObstacle(); lastObstacleFrame = frame; }
+      obstacles.forEach(o=>o.x-=speed*delta);
       obstacles=obstacles.filter(o=>o.x+o.w>-10);
       for(const o of obstacles) {
         if(player.x+player.w-7>o.x && player.x+7<o.x+o.w && player.y+player.h-4>o.y) { endGame(); break; }
       }
-      particles.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.vy+=.12;p.life--;});
+      particles.forEach(p=>{p.x+=p.vx*delta;p.y+=p.vy*delta;p.vy+=.12*delta;p.life-=delta;});
       particles=particles.filter(p=>p.life>0);
     }
     obstacles.forEach(drawObstacle);
@@ -259,7 +269,7 @@
     drawPlayer();
     requestAnimationFrame(loop);
   }
-  loop();
+  requestAnimationFrame(loop);
 })();
 </script>
 </body>
