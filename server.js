@@ -22,13 +22,13 @@ function makeCode() {
 }
 function roomPlayers(room) {
   return [...room.players.values()].map(p => ({
-    id: p.id, name: p.name, score: p.score || 0, alive: p.alive !== false
+    id: p.id, name: p.name, score: p.score || 0, alive: p.alive !== false, ready: !!p.ready
   }));
 }
 function broadcastRoom(code) {
   const room = rooms.get(code);
   if (!room) return;
-  io.to(code).emit("room-update", { roomCode: code, players: roomPlayers(room) });
+  io.to(code).emit("room-update", { roomCode: code, players: roomPlayers(room), roundComplete: room.roundComplete, readyCount: room.ready.size });
 }
 function cleanName(value) {
   return String(value || "Runner").replace(/[<>]/g, "").trim().slice(0, 16) || "Runner";
@@ -39,9 +39,9 @@ io.on("connection", socket => {
     // Remove this socket from any previous room first.
     leaveRoom(socket);
     const code = makeCode();
-    const room = { players: new Map(), createdAt: Date.now() };
+    const room = { players: new Map(), createdAt: Date.now(), roundComplete: false, ready: new Set() };
     rooms.set(code, room);
-    room.players.set(socket.id, { id: socket.id, name: cleanName(name), score: 0, alive: true });
+    room.players.set(socket.id, { id: socket.id, name: cleanName(name), score: 0, alive: true, ready: false });
     socket.join(code);
     socket.data.roomCode = code;
     socket.emit("room-created", { roomCode: code });
@@ -56,7 +56,7 @@ io.on("connection", socket => {
     if (room.players.size >= 8 && !room.players.has(socket.id))
       return socket.emit("room-error", "This room is full (maximum 8 players).");
     leaveRoom(socket);
-    room.players.set(socket.id, { id: socket.id, name: cleanName(name), score: 0, alive: true });
+    room.players.set(socket.id, { id: socket.id, name: cleanName(name), score: 0, alive: true, ready: false });
     socket.join(code);
     socket.data.roomCode = code;
     socket.emit("room-joined", { roomCode: code, players: roomPlayers(room) });
@@ -71,9 +71,37 @@ io.on("connection", socket => {
     if (!player) return;
     player.score = Math.max(0, Math.min(100000000, Number(score) || 0));
     player.alive = Boolean(alive);
+    if (!player.alive) {
+      player.ready = false;
+      room.ready.delete(socket.id);
+      const everyoneFinished = [...room.players.values()].every(p => p.alive === false);
+      if (everyoneFinished && room.players.size > 0) {
+        room.roundComplete = true;
+        broadcastRoom(code);
+        io.to(code).emit("round-complete", { players: roomPlayers(room) });
+      }
+    }
     socket.to(code).emit("player-state", { id: socket.id, score: player.score, alive: player.alive });
     // Roster is authoritative; periodic updates let everyone see live scores.
     if (Math.floor(player.score) % 10 === 0) broadcastRoom(code);
+  });
+
+  socket.on("ready-next-race", ({ roomCode } = {}) => {
+    const code = String(roomCode || "").toUpperCase();
+    if (socket.data.roomCode !== code) return;
+    const room = rooms.get(code);
+    const player = room && room.players.get(socket.id);
+    if (!room || !player || !room.roundComplete) return;
+    player.ready = true;
+    room.ready.add(socket.id);
+    broadcastRoom(code);
+    if ([...room.players.keys()].every(id => room.ready.has(id))) {
+      room.roundComplete = false;
+      room.ready.clear();
+      for (const p of room.players.values()) { p.score = 0; p.alive = true; p.ready = false; }
+      io.to(code).emit("next-race-start", { players: roomPlayers(room) });
+      broadcastRoom(code);
+    }
   });
 
   socket.on("disconnect", () => leaveRoom(socket));
@@ -83,6 +111,12 @@ io.on("connection", socket => {
     const room = rooms.get(code);
     if (room) {
       room.players.delete(s.id);
+      room.ready.delete(s.id);
+      if (room.roundComplete && room.players.size > 0 && [...room.players.keys()].every(id => room.ready.has(id))) {
+        room.roundComplete = false; room.ready.clear();
+        for (const p of room.players.values()) { p.score = 0; p.alive = true; p.ready = false; }
+        io.to(code).emit("next-race-start", { players: roomPlayers(room) });
+      }
       if (room.players.size === 0) rooms.delete(code);
       else broadcastRoom(code);
     }
