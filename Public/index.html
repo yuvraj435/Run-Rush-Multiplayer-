@@ -130,7 +130,15 @@
     });
     socket.on('room-update', data => {
       activeRoom = data.roomCode; renderPlayers(data.players || []);
-      roomInfoEl.textContent = 'Room ' + activeRoom + ' · ' + (data.players || []).length + ' player(s) connected.';
+      if (data.roundComplete) showWaitingRoom(data.readyCount || 0, (data.players || []).length);
+      else roomInfoEl.textContent = 'Room ' + activeRoom + ' · ' + (data.players || []).length + ' player(s) connected.';
+    });
+    socket.on('round-complete', data => showWaitingRoom(0, (data.players || []).length));
+    socket.on('next-race-start', data => {
+      renderPlayers(data.players || []);
+      reset();
+      titleEl.textContent = 'Ready, runners!';
+      roomInfoEl.textContent = 'Everyone is ready. The new race has started!';
     });
     socket.on('room-error', msg => { roomInfoEl.textContent = msg; });
     socket.on('player-state', data => {
@@ -146,9 +154,27 @@
       const chip = document.createElement('div'); chip.className = 'player-chip';
       const label = document.createElement('span'); label.textContent = p.name + (p.id === (socket && socket.id) ? ' (you)' : '');
       const score = document.createElement('b'); score.textContent = ' · ' + (p.score || 0) + ' pts';
-      const state = document.createElement('span'); state.textContent = p.alive === false ? ' · Finished' : ' · Running';
+      const state = document.createElement('span'); state.textContent = p.alive === false ? (p.ready ? ' · Ready' : ' · Finished') : ' · Running';
       chip.append(label, score, state); playersEl.appendChild(chip);
     });
+  }
+  function showWaitingRoom(readyCount, total) {
+    running = false; gameOver = true;
+    titleEl.textContent = 'Race finished!';
+    textEl.textContent = `Everyone has finished. ${readyCount} of ${total} players ready for the next race.`;
+    startBtn.textContent = 'Play Again';
+    startBtn.disabled = false;
+    startBtn.onclick = () => {
+      if (socket && activeRoom) {
+        startBtn.disabled = true;
+        titleEl.textContent = 'Waiting for everyone…';
+        textEl.textContent = 'You are ready! The next race starts when all players press Play Again.';
+        socket.emit('ready-next-race', { roomCode: activeRoom });
+      } else {
+        reset();
+      }
+    };
+    overlay.classList.remove('hidden');
   }
   const reportState = (score, alive) => {
     if (socket && activeRoom) socket.emit('game-state', { roomCode: activeRoom, score: Math.floor(score), alive });
@@ -172,7 +198,7 @@
   bestEl.textContent = best;
   for(let i=0;i<6;i++) clouds.push({x:i*190+30,y:45+Math.random()*120,s:.65+Math.random()*.8});
   function reset() {
-    score=0; speed=6; frame=0; lastObstacleFrame=0; obstacles=[]; particles=[];
+    score=0; speed=6; frame=0; lastObstacleFrame=0; obstacles=[]; particles=[]; startBtn.disabled=false; startBtn.textContent='Start running'; startBtn.onclick=null;
     player.y=ground-player.h; player.vy=0; player.onGround=true;
     scoreEl.textContent='0'; gameOver=false; running=true; overlay.classList.add('hidden');
   }
@@ -180,7 +206,7 @@
     if (!running) { if (!gameOver) reset(); else reset(); return; }
     if (player.onGround) { player.vy=-15.5; player.onGround=false; burst(player.x+20,player.y+player.h,7); }
   }
-  startBtn.addEventListener('click', reset);
+  startBtn.addEventListener('click', () => { if (!activeRoom) reset(); else if (!gameOver) reset(); });
   canvas.addEventListener('pointerdown', e => { e.preventDefault(); jump(); });
   document.addEventListener('keydown', e => {
     if (['Space','ArrowUp','KeyW'].includes(e.code)) { e.preventDefault(); if(e.repeat)return; if(!running) { if(gameOver) reset(); else reset(); } else jump(); }
@@ -191,8 +217,11 @@
     bestEl.textContent=best;
     try { localStorage.setItem('runrush-best',best); } catch(e) {}
     titleEl.textContent='Run over!';
-    textEl.textContent=`You scored ${Math.floor(score)} points. Ready for another run?`;
-    startBtn.textContent='Run again';
+    textEl.textContent=`You scored ${Math.floor(score)} points. Waiting for the other players to finish…`;
+    startBtn.textContent='Waiting for players…';
+    startBtn.disabled = true;
+    if (socket && activeRoom) { startBtn.onclick = null; }
+    else { startBtn.textContent='Run again'; startBtn.disabled=false; }
     overlay.classList.remove('hidden');
   }
   function roundedRect(x,y,w,h,r,color) {
