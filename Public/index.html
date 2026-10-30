@@ -190,6 +190,7 @@
   const startBtn = document.getElementById('startBtn');
   const W = canvas.width, H = canvas.height, ground = 385;
   let running = false, gameOver = false, score = 0, best = 0, speed = 6, frame = 0;
+  let lastSoloMessageIndex = -1;
   // Scale game physics by elapsed time so different phone refresh rates play at the same speed.
   let lastTimestamp = 0, delta = 1, lastObstacleFrame = 0;
   let obstacles = [], particles = [], clouds = [];
@@ -217,11 +218,33 @@
     bestEl.textContent=best;
     try { localStorage.setItem('runrush-best',best); } catch(e) {}
     titleEl.textContent='Run over!';
-    textEl.textContent=`You scored ${Math.floor(score)} points. Waiting for the other players to finish…`;
-    startBtn.textContent='Waiting for players…';
-    startBtn.disabled = true;
-    if (socket && activeRoom) { startBtn.onclick = null; }
-    else { startBtn.textContent='Run again'; startBtn.disabled=false; }
+    if (socket && activeRoom) {
+      textEl.textContent=`You scored ${Math.floor(score)} points. Waiting for the other players to finish…`;
+      startBtn.textContent='Waiting for players…';
+      startBtn.disabled = true;
+      startBtn.onclick = null;
+    } else {
+      const soloMessages = [
+        'Great run! Ready for another?',
+        'Can you beat your best score this time?',
+        'Another race, another chance to shine!',
+        'Keep going, runner! The track is yours!',
+        'Nice effort! Let’s see what you can do next!',
+        'The next run could be your best one yet!',
+        'Stay sharp and keep rushing!',
+        'Challenge yourself and chase a new high score!',
+        'You’ve got this! Ready to run again?',
+        'Every run makes you stronger. Go again!'
+      ];
+      let messageIndex = Math.floor(Math.random() * soloMessages.length);
+      if (soloMessages.length > 1 && messageIndex === lastSoloMessageIndex) {
+        messageIndex = (messageIndex + 1 + Math.floor(Math.random() * (soloMessages.length - 1))) % soloMessages.length;
+      }
+      lastSoloMessageIndex = messageIndex;
+      textEl.textContent = `You scored ${Math.floor(score)} points. ${soloMessages[messageIndex]}`;
+      startBtn.textContent='Run again';
+      startBtn.disabled=false;
+    }
     overlay.classList.remove('hidden');
   }
   function roundedRect(x,y,w,h,r,color) {
