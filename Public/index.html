@@ -37,6 +37,8 @@
   .player-chip b { color:var(--accent); }
   .game-shell { position:relative; overflow:hidden; border:1px solid #ffffff26; border-radius:22px; box-shadow:0 24px 70px #0008; background:#121d36; }
   canvas { display:block; width:100%; height:auto; aspect-ratio: 16 / 8; touch-action:manipulation; }
+  .game-shell { background:#050817; }
+  .game-hud { position:absolute; left:12px; top:10px; z-index:1; color:#bdfcff; font-size:.72rem; letter-spacing:.12em; text-shadow:0 0 10px #00eaff; pointer-events:none; }
   .overlay { position:absolute; inset:0; display:grid; place-items:center; padding:20px; text-align:center; background:#0911269c; backdrop-filter:blur(5px); }
   .overlay.hidden { display:none; }
   .modal { max-width:420px; }
@@ -72,7 +74,8 @@
     <div id="playersList" class="players-list"></div>
   </section>
   <section class="game-shell" aria-label="Run Rush game">
-    <canvas id="game" width="960" height="480" aria-label="Runner game. Tap, click, or press space to jump."></canvas>
+    <div class="game-hud">NEON CIRCUIT · 3D RACE</div>
+    <canvas id="game" width="960" height="480" aria-label="3D runner game. Tap, click, or press space to jump."></canvas>
     <div class="overlay" id="overlay">
       <div class="modal">
         <div style="font-size:3rem;margin-bottom:8px">🏃</div>
@@ -88,6 +91,7 @@
   </div>
 </main>
 <script src="/socket.io/socket.io.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 <script>
 (() => {
   const socket = (typeof io === 'function') ? io() : null;
@@ -99,6 +103,7 @@
   const copyBtn = document.getElementById('copyRoom');
   let activeRoom = '';
   let currentPlayers = [];
+  const remoteMotion = new Map();
   function showStatus(text) { statusEl.textContent = text; }
   function emitRoom(action) {
     if (!socket) { showStatus('Server connection unavailable'); roomInfoEl.textContent = 'Open this game from the hosted server URL, not as a downloaded file.'; return; }
@@ -136,15 +141,25 @@
     socket.on('round-complete', data => showWaitingRoom(0, (data.players || []).length));
     socket.on('next-race-start', data => {
       renderPlayers(data.players || []);
+      remoteMotion.clear();
       reset();
       titleEl.textContent = 'Ready, runners!';
       roomInfoEl.textContent = 'Everyone is ready. The new race has started!';
     });
     socket.on('room-error', msg => { roomInfoEl.textContent = msg; });
     socket.on('player-state', data => {
-      // Real-time rival scores/status are shown in the multiplayer roster.
       const p = currentPlayers.find(x => x.id === data.id);
       if (p) { p.score = data.score; p.alive = data.alive; renderPlayers(currentPlayers); }
+    });
+    socket.on('player-motion', data => {
+      remoteMotion.set(data.id, {
+        jump: Math.max(0, Math.min(1, Number(data.jump) || 0)),
+        running: !!data.running,
+        score: Number(data.score) || 0,
+        receivedAt: performance.now()
+      });
+      const p = currentPlayers.find(x => x.id === data.id);
+      if (p) { p.score = Number(data.score) || p.score; }
     });
   }
   function renderPlayers(players) {
@@ -179,9 +194,15 @@
   const reportState = (score, alive) => {
     if (socket && activeRoom) socket.emit('game-state', { roomCode: activeRoom, score: Math.floor(score), alive });
   };
+  let lastMotionSent = 0;
+  function sendMotion(now) {
+    if (!socket || !activeRoom || !running || now - lastMotionSent < 100) return;
+    lastMotionSent = now;
+    const jump = Math.max(0, Math.min(1, (ground - player.h - player.y) / 110));
+    socket.emit('player-motion', { roomCode: activeRoom, jump, running, score: Math.floor(score) });
+  }
 
   const canvas = document.getElementById('game');
-  const ctx = canvas.getContext('2d');
   const scoreEl = document.getElementById('score');
   const bestEl = document.getElementById('best');
   const overlay = document.getElementById('overlay');
@@ -191,6 +212,195 @@
   const W = canvas.width, H = canvas.height, ground = 385;
   let running = false, gameOver = false, score = 0, best = 0, speed = 6, frame = 0;
   let lastSoloMessageIndex = -1;
+
+  // 3D neon circuit. Game scoring and collision calculations below remain the original rules.
+  let scene, camera, renderer, worldClock;
+  let localRunner, remoteRunners = new Map(), obstacleMeshes = new Map();
+  let roadMarks = [], cityBlocks = [], threeReady = false;
+  const runnerColors = [0x32f5ff, 0xff4de1, 0xa4ff4d, 0xffb347, 0x9d7bff, 0xff6688, 0x54ffd0, 0xffffff];
+
+  function makeRunner(color, isLocal) {
+    const group = new THREE.Group();
+    const suit = new THREE.MeshStandardMaterial({ color, metalness: 0.72, roughness: 0.22, emissive: color, emissiveIntensity: 0.38 });
+    const dark = new THREE.MeshStandardMaterial({ color: 0x10172b, metalness: 0.65, roughness: 0.28 });
+    const glow = new THREE.MeshStandardMaterial({ color: 0x8fffff, emissive: 0x00dfff, emissiveIntensity: 1.5 });
+    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.34, 0.72, 5, 10), suit);
+    body.position.y = 1.18; group.add(body);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.27, 16, 12), dark);
+    head.position.y = 1.92; group.add(head);
+    const visor = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.11, 0.12), glow);
+    visor.position.set(0, 1.96, 0.22); group.add(visor);
+    const chest = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.12, 0.12), glow);
+    chest.position.set(0, 1.38, 0.32); group.add(chest);
+    const limbGeo = new THREE.CylinderGeometry(0.085, 0.11, 0.65, 8);
+    const arms = [], legs = [];
+    for (const side of [-1, 1]) {
+      const arm = new THREE.Mesh(limbGeo, dark);
+      arm.position.set(side * 0.43, 1.25, 0); group.add(arm); arms.push(arm);
+      const leg = new THREE.Mesh(limbGeo, suit);
+      leg.position.set(side * 0.16, 0.48, 0); group.add(leg); legs.push(leg);
+      const boot = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.12, 0.34), glow);
+      boot.position.set(side * 0.16, 0.12, 0.08); group.add(boot);
+    }
+    const aura = new THREE.PointLight(color, isLocal ? 1.1 : 0.55, 4);
+    aura.position.set(0, 1.3, 0); group.add(aura);
+    group.userData = { arms, legs, isLocal };
+    return group;
+  }
+
+  function initThree() {
+    if (!window.THREE) {
+      roomInfoEl.textContent = '3D graphics could not load. Check your internet connection and reload.';
+      return;
+    }
+    try {
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x050817);
+      scene.fog = new THREE.Fog(0x050817, 18, 72);
+      camera = new THREE.PerspectiveCamera(55, 2, 0.1, 120);
+      camera.position.set(0, 8.5, 13.5);
+      camera.lookAt(0, 1.0, -8);
+      renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+      renderer.setSize(canvas.clientWidth || 960, canvas.clientHeight || 480, false);
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      worldClock = new THREE.Clock();
+
+      scene.add(new THREE.HemisphereLight(0x9ecbff, 0x111020, 1.35));
+      const key = new THREE.DirectionalLight(0xffffff, 2.0);
+      key.position.set(-5, 12, 7); key.castShadow = true; scene.add(key);
+      const cyanLight = new THREE.PointLight(0x00dfff, 24, 32); cyanLight.position.set(-7, 5, -10); scene.add(cyanLight);
+      const pinkLight = new THREE.PointLight(0xff19cf, 18, 28); pinkLight.position.set(8, 4, -18); scene.add(pinkLight);
+
+      const floor = new THREE.Mesh(new THREE.PlaneGeometry(90, 100), new THREE.MeshStandardMaterial({ color: 0x080d1c, metalness: 0.45, roughness: 0.65 }));
+      floor.rotation.x = -Math.PI / 2; floor.position.set(0, -0.13, -25); floor.receiveShadow = true; scene.add(floor);
+      const road = new THREE.Mesh(new THREE.PlaneGeometry(13.5, 90), new THREE.MeshStandardMaterial({ color: 0x10182b, metalness: 0.55, roughness: 0.38 }));
+      road.rotation.x = -Math.PI / 2; road.position.set(0, -0.04, -24); road.receiveShadow = true; scene.add(road);
+
+      for (const x of [-6.8, 6.8, -2.25, 2.25]) {
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.08, 90), new THREE.MeshStandardMaterial({ color: 0x00dfff, emissive: 0x00bfff, emissiveIntensity: 1.8 }));
+        rail.position.set(x, 0.03, -24); scene.add(rail);
+      }
+      for (let i = 0; i < 24; i++) {
+        const mark = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.025, 1.25), new THREE.MeshBasicMaterial({ color: i % 2 ? 0x00dfff : 0xff29d7 }));
+        mark.position.set(i % 2 ? -2.25 : 2.25, 0.02, 5 - i * 4);
+        scene.add(mark); roadMarks.push(mark);
+      }
+      for (let i = 0; i < 26; i++) {
+        for (const side of [-1, 1]) {
+          const h = 3 + Math.random() * 13, w = 1.4 + Math.random() * 2.8;
+          const mat = new THREE.MeshStandardMaterial({ color: side < 0 ? 0x111c3d : 0x241139, metalness: 0.6, roughness: 0.4, emissive: side < 0 ? 0x062c52 : 0x38072f, emissiveIntensity: 0.5 });
+          const building = new THREE.Mesh(new THREE.BoxGeometry(w, h, 2 + Math.random() * 3), mat);
+          building.position.set(side * (9 + Math.random() * 7), h / 2 - 0.1, -i * 4 - 8);
+          scene.add(building); cityBlocks.push(building);
+          const strip = new THREE.Mesh(new THREE.BoxGeometry(0.045, h * 0.72, 0.05), new THREE.MeshBasicMaterial({ color: side < 0 ? 0x00dfff : 0xff26cf }));
+          strip.position.set(building.position.x - side * (w * 0.28), h * 0.48, building.position.z + 1.52);
+          scene.add(strip);
+        }
+      }
+      localRunner = makeRunner(0x32f5ff, true);
+      localRunner.position.set(0, 0, 2.0); scene.add(localRunner);
+      threeReady = true;
+      resizeThree();
+    } catch (err) {
+      console.error('3D initialization failed:', err);
+      roomInfoEl.textContent = 'This browser could not start 3D graphics. Try a recent version of Chrome.';
+    }
+  }
+
+  function resizeThree() {
+    if (!renderer || !camera) return;
+    const width = canvas.clientWidth || 960;
+    const height = canvas.clientHeight || 480;
+    renderer.setSize(width, height, false);
+    camera.aspect = width / height;
+    camera.updateProjectionMatrix();
+  }
+  window.addEventListener('resize', resizeThree);
+
+  function syncRemoteRunners() {
+    if (!threeReady) return;
+    const visible = new Set();
+    const players = currentPlayers.filter(p => p.id !== (socket && socket.id));
+    players.forEach((p, index) => {
+      visible.add(p.id);
+      let avatar = remoteRunners.get(p.id);
+      if (!avatar) {
+        avatar = makeRunner(runnerColors[(index + 1) % runnerColors.length], false);
+        scene.add(avatar); remoteRunners.set(p.id, avatar);
+      }
+      const lane = Number.isFinite(p.lane) ? p.lane : index + 1;
+      const laneX = (lane - (currentPlayers.length - 1) / 2) * 1.65;
+      avatar.position.x = laneX;
+      const motion = remoteMotion.get(p.id);
+      const jump = motion ? motion.jump : (p.jump || 0);
+      avatar.position.y = jump * 2.1;
+      avatar.visible = true;
+    });
+    for (const [id, avatar] of remoteRunners) {
+      if (!visible.has(id)) { scene.remove(avatar); remoteRunners.delete(id); remoteMotion.delete(id); }
+    }
+  }
+
+  function animateRunner(group, time, isRunning) {
+    if (!group) return;
+    const swing = isRunning ? Math.sin(time * 12) * 0.62 : 0;
+    group.userData.legs.forEach((leg, i) => { leg.rotation.x = i === 0 ? swing : -swing; });
+    group.userData.arms.forEach((arm, i) => { arm.rotation.x = i === 0 ? -swing * 0.75 : swing * 0.75; });
+    group.position.y += isRunning ? Math.abs(Math.sin(time * 12)) * 0.025 : 0;
+  }
+
+  function localLaneX() {
+    if (currentPlayers.length <= 1) return 0;
+    const me = currentPlayers.find(p => p.id === (socket && socket.id));
+    const lane = me && Number.isFinite(me.lane) ? me.lane : 0;
+    return (lane - (currentPlayers.length - 1) / 2) * 1.65;
+  }
+
+  function renderThree() {
+    if (!threeReady) return;
+    const t = worldClock.getElapsedTime();
+    roadMarks.forEach(mark => {
+      mark.position.z += running ? speed * delta * 0.12 : 0.015;
+      if (mark.position.z > 7) mark.position.z -= 96;
+    });
+    if (localRunner) {
+      localRunner.position.x = localLaneX();
+      localRunner.position.y = Math.max(0, (ground - player.h - player.y) / 30);
+      animateRunner(localRunner, t, running && player.onGround);
+    }
+    syncRemoteRunners();
+    for (const p of currentPlayers) {
+      const avatar = remoteRunners.get(p.id);
+      if (avatar) animateRunner(avatar, t + (p.lane || 0) * 0.2, p.alive !== false);
+    }
+    const activeIds = new Set();
+    obstacles.forEach((o, i) => {
+      const id = o._threeId || (o._threeId = 'obs-' + i + '-' + Math.round(o.x));
+      activeIds.add(id);
+      let mesh = obstacleMeshes.get(id);
+      if (!mesh) {
+        const group = new THREE.Group();
+        const mat = new THREE.MeshStandardMaterial({ color: 0x291044, metalness: 0.5, roughness: 0.25, emissive: 0xff19d7, emissiveIntensity: 1.6 });
+        const core = new THREE.Mesh(new THREE.BoxGeometry(1.05, 1.35, 0.85), mat);
+        core.position.y = 0.72; core.castShadow = true; group.add(core);
+        const edgeMat = new THREE.MeshBasicMaterial({ color: 0x8fffff });
+        for (const x of [-0.56, 0.56]) {
+          const edge = new THREE.Mesh(new THREE.BoxGeometry(0.07, 1.48, 0.92), edgeMat);
+          edge.position.set(x, 0.72, 0); group.add(edge);
+        }
+        scene.add(group); mesh = group; obstacleMeshes.set(id, mesh);
+      }
+      mesh.position.set(localLaneX(), 0, 2 - (o.x - player.x) * 0.0435);
+      mesh.rotation.y = Math.sin(t * 2 + i) * 0.04;
+    });
+    for (const [id, mesh] of obstacleMeshes) {
+      if (!activeIds.has(id)) { scene.remove(mesh); obstacleMeshes.delete(id); }
+    }
+    renderer.render(scene, camera);
+  }
+
   // Scale game physics by elapsed time so different phone refresh rates play at the same speed.
   let lastTimestamp = 0, delta = 1, lastObstacleFrame = 0;
   let obstacles = [], particles = [], clouds = [];
@@ -201,7 +411,9 @@
   function reset() {
     score=0; speed=6; frame=0; lastObstacleFrame=0; obstacles=[]; particles=[]; startBtn.disabled=false; startBtn.textContent='Start running'; startBtn.onclick=null;
     player.y=ground-player.h; player.vy=0; player.onGround=true;
-    scoreEl.textContent='0'; gameOver=false; running=true; overlay.classList.add('hidden');
+    scoreEl.textContent='0'; gameOver=false; running=true;
+    if (socket && activeRoom) socket.emit('player-motion', { roomCode: activeRoom, jump: 0, running: true, score: 0 });
+    overlay.classList.add('hidden');
   }
   function jump() {
     if (!running) { if (!gameOver) reset(); else reset(); return; }
@@ -214,7 +426,9 @@
   });
   function burst(x,y,n) { for(let i=0;i<n;i++) particles.push({x,y,vx:(Math.random()-.5)*4,vy:-Math.random()*3,life:20+Math.random()*10}); }
   function endGame() {
-    running=false; gameOver=true; reportState(score,false); best=Math.max(best,Math.floor(score));
+    running=false; gameOver=true; reportState(score,false);
+    if (socket && activeRoom) socket.emit('player-motion', { roomCode: activeRoom, jump: 0, running: false, score: Math.floor(score) });
+    best=Math.max(best,Math.floor(score));
     bestEl.textContent=best;
     try { localStorage.setItem('runrush-best',best); } catch(e) {}
     titleEl.textContent='Run over!';
@@ -247,56 +461,11 @@
     }
     overlay.classList.remove('hidden');
   }
-  function roundedRect(x,y,w,h,r,color) {
-    ctx.fillStyle=color; ctx.beginPath(); ctx.roundRect(x,y,w,h,r); ctx.fill();
-  }
-  function drawBackground() {
-    const g=ctx.createLinearGradient(0,0,0,H);
-    g.addColorStop(0,'#1c3157'); g.addColorStop(1,'#182342');
-    ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
-    ctx.fillStyle='#ffe5a6'; ctx.beginPath(); ctx.arc(780,95,34,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#ffffff18';
-    for(const c of clouds) {
-      ctx.beginPath(); ctx.ellipse(c.x,c.y,34*c.s,13*c.s,0,0,Math.PI*2); ctx.ellipse(c.x+22*c.s,c.y-7*c.s,22*c.s,17*c.s,0,0,Math.PI*2); ctx.ellipse(c.x+42*c.s,c.y,27*c.s,12*c.s,0,0,Math.PI*2); ctx.fill();
-      if(running)c.x-=speed*.18*c.s*delta;
-      if(c.x < -90)c.x=W+50;
-    }
-    // distant hills
-    ctx.fillStyle='#253d62'; ctx.beginPath(); ctx.moveTo(0,ground);
-    for(let x=0;x<=W;x+=80) ctx.lineTo(x,300+Math.sin(x*.012+frame*.003)*26);
-    ctx.lineTo(W,ground);ctx.closePath();ctx.fill();
-    ctx.fillStyle='#172d3b';ctx.fillRect(0,ground,W,H-ground);
-    ctx.fillStyle='#76f7c5';ctx.fillRect(0,ground,W,5);
-    ctx.fillStyle='#ffffff24';
-    for(let x=-(frame*speed*.7)%90;x<W;x+=90) ctx.fillRect(x,ground+45,42,4);
-  }
-  function drawPlayer() {
-    const bob=player.onGround && running ? Math.sin(frame*.35)*2 : 0;
-    // shadow
-    ctx.fillStyle='#0004';ctx.beginPath();ctx.ellipse(player.x+22,ground+3,28,7,0,0,Math.PI*2);ctx.fill();
-    roundedRect(player.x,player.y+bob,player.w,player.h,12,'#76f7c5');
-    roundedRect(player.x+7,player.y+9+bob,28,22,8,'#143b45');
-    ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(player.x+28,player.y+19+bob,4,0,Math.PI*2);ctx.fill();
-    ctx.fillStyle='#143b45';ctx.beginPath();ctx.arc(player.x+29,player.y+19+bob,2,0,Math.PI*2);ctx.fill();
-    // legs
-    ctx.strokeStyle='#76f7c5';ctx.lineWidth=8;ctx.lineCap='round';
-    const swing=player.onGround && running ? Math.sin(frame*.4)*8 : -4;
-    ctx.beginPath();ctx.moveTo(player.x+12,player.y+player.h-3+bob);ctx.lineTo(player.x+9+swing,player.y+player.h+7+bob);ctx.moveTo(player.x+31,player.y+player.h-3+bob);ctx.lineTo(player.x+32-swing,player.y+player.h+7+bob);ctx.stroke();
-  }
-  function spawnObstacle() {
-    const h=34+Math.random()*30, w=28+Math.random()*20;
-    obstacles.push({x:W+20,y:ground-h,w,h});
-  }
-  function drawObstacle(o) {
-    roundedRect(o.x,o.y,o.w,o.h,7,'#ff7b72');
-    roundedRect(o.x+5,o.y+7,o.w-10,5,3,'#ffc0a9');
-    ctx.fillStyle='#d64d60';ctx.fillRect(o.x+4,o.y+o.h-7,o.w-8,7);
-  }
   function loop(timestamp = 0) {
     // delta=1 is one 60 Hz frame. Cap large gaps (e.g. switching tabs) to avoid sudden jumps.
     delta = lastTimestamp ? Math.min((timestamp - lastTimestamp) / (1000 / 60), 2) : 1;
     lastTimestamp = timestamp;
-    drawBackground();
+    sendMotion(timestamp);
     if(running) {
       frame += delta;
       score += .12 * delta;
@@ -316,11 +485,10 @@
       particles.forEach(p=>{p.x+=p.vx*delta;p.y+=p.vy*delta;p.vy+=.12*delta;p.life-=delta;});
       particles=particles.filter(p=>p.life>0);
     }
-    obstacles.forEach(drawObstacle);
-    particles.forEach(p=>{ctx.globalAlpha=Math.max(0,p.life/25);ctx.fillStyle='#76f7c5';ctx.fillRect(p.x,p.y,4,4);ctx.globalAlpha=1;});
-    drawPlayer();
+    if (threeReady) renderThree();
     requestAnimationFrame(loop);
   }
+  initThree();
   requestAnimationFrame(loop);
 })();
 </script>
