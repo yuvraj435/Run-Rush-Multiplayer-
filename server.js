@@ -21,8 +21,11 @@ function makeCode() {
   return code;
 }
 function roomPlayers(room) {
-  return [...room.players.values()].map(p => ({
-    id: p.id, name: p.name, score: p.score || 0, alive: p.alive !== false, ready: !!p.ready
+  const players = [...room.players.values()];
+  return players.map((p, index) => ({
+    id: p.id, name: p.name, score: p.score || 0,
+    alive: p.alive !== false, ready: !!p.ready,
+    lane: index, jump: Number(p.jump) || 0, running: !!p.running
   }));
 }
 function broadcastRoom(code) {
@@ -41,7 +44,7 @@ io.on("connection", socket => {
     const code = makeCode();
     const room = { players: new Map(), createdAt: Date.now(), roundComplete: false, ready: new Set() };
     rooms.set(code, room);
-    room.players.set(socket.id, { id: socket.id, name: cleanName(name), score: 0, alive: true, ready: false });
+    room.players.set(socket.id, { id: socket.id, name: cleanName(name), score: 0, alive: true, ready: false, jump: 0, running: false });
     socket.join(code);
     socket.data.roomCode = code;
     socket.emit("room-created", { roomCode: code });
@@ -56,7 +59,7 @@ io.on("connection", socket => {
     if (room.players.size >= 8 && !room.players.has(socket.id))
       return socket.emit("room-error", "This room is full (maximum 8 players).");
     leaveRoom(socket);
-    room.players.set(socket.id, { id: socket.id, name: cleanName(name), score: 0, alive: true, ready: false });
+    room.players.set(socket.id, { id: socket.id, name: cleanName(name), score: 0, alive: true, ready: false, jump: 0, running: false });
     socket.join(code);
     socket.data.roomCode = code;
     socket.emit("room-joined", { roomCode: code, players: roomPlayers(room) });
@@ -86,6 +89,23 @@ io.on("connection", socket => {
     if (Math.floor(player.score) % 10 === 0) broadcastRoom(code);
   });
 
+  // Relay each runner's lightweight movement so every device can render the same racers.
+  socket.on("player-motion", ({ roomCode, jump, running, score } = {}) => {
+    const code = String(roomCode || "").toUpperCase();
+    if (socket.data.roomCode !== code) return;
+    const room = rooms.get(code);
+    const player = room && room.players.get(socket.id);
+    if (!player) return;
+    player.jump = Math.max(0, Math.min(1, Number(jump) || 0));
+    player.running = Boolean(running) && player.alive !== false;
+    if (Number.isFinite(Number(score))) {
+      player.score = Math.max(0, Math.min(100000000, Number(score)));
+    }
+    socket.to(code).emit("player-motion", {
+      id: socket.id, jump: player.jump, running: player.running, score: player.score
+    });
+  });
+
   socket.on("ready-next-race", ({ roomCode } = {}) => {
     const code = String(roomCode || "").toUpperCase();
     if (socket.data.roomCode !== code) return;
@@ -98,7 +118,7 @@ io.on("connection", socket => {
     if ([...room.players.keys()].every(id => room.ready.has(id))) {
       room.roundComplete = false;
       room.ready.clear();
-      for (const p of room.players.values()) { p.score = 0; p.alive = true; p.ready = false; }
+      for (const p of room.players.values()) { p.score = 0; p.alive = true; p.ready = false; p.jump = 0; p.running = true; }
       io.to(code).emit("next-race-start", { players: roomPlayers(room) });
       broadcastRoom(code);
     }
@@ -114,7 +134,7 @@ io.on("connection", socket => {
       room.ready.delete(s.id);
       if (room.roundComplete && room.players.size > 0 && [...room.players.keys()].every(id => room.ready.has(id))) {
         room.roundComplete = false; room.ready.clear();
-        for (const p of room.players.values()) { p.score = 0; p.alive = true; p.ready = false; }
+        for (const p of room.players.values()) { p.score = 0; p.alive = true; p.ready = false; p.jump = 0; p.running = true; }
         io.to(code).emit("next-race-start", { players: roomPlayers(room) });
       }
       if (room.players.size === 0) rooms.delete(code);
