@@ -408,6 +408,14 @@
   try { best = Number(localStorage.getItem('runrush-best') || 0); } catch(e) {}
   bestEl.textContent = best;
   for(let i=0;i<6;i++) clouds.push({x:i*190+30,y:45+Math.random()*120,s:.65+Math.random()*.8});
+
+  // Create a new obstacle just beyond the right edge of the track.
+  // The game loop and collision checks use these x/y/w/h values.
+  function spawnObstacle() {
+    const h = 34 + Math.random() * 24;
+    const w = 26 + Math.random() * 16;
+    obstacles.push({ x: W + 20, y: ground - h, w, h });
+  }
   function reset() {
     score=0; speed=6; frame=0; lastObstacleFrame=0; obstacles=[]; particles=[]; startBtn.disabled=false; startBtn.textContent='Start running'; startBtn.onclick=null;
     player.y=ground-player.h; player.vy=0; player.onGround=true;
