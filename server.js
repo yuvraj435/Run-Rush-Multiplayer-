@@ -106,6 +106,29 @@ io.on("connection", socket => {
     });
   });
 
+  // Relay each player's obstacle positions so every device can render that
+  // player's own obstacle lane. Values are bounded before being forwarded.
+  socket.on("player-obstacles", ({ roomCode, obstacles, speed } = {}) => {
+    const code = String(roomCode || "").toUpperCase();
+    if (socket.data.roomCode !== code) return;
+    const room = rooms.get(code);
+    const player = room && room.players.get(socket.id);
+    if (!player) return;
+    const safeObstacles = Array.isArray(obstacles) ? obstacles.slice(0, 24).map((o, index) => ({
+      id: String(o && o.id != null ? o.id : index).slice(0, 40),
+      x: Math.max(-1000, Math.min(3000, Number(o && o.x) || 0)),
+      y: Math.max(-1000, Math.min(1000, Number(o && o.y) || 0)),
+      w: Math.max(1, Math.min(200, Number(o && o.w) || 1)),
+      h: Math.max(1, Math.min(200, Number(o && o.h) || 1))
+    })) : [];
+    const safeSpeed = Math.max(0, Math.min(20, Number(speed) || 0));
+    player.obstacles = safeObstacles;
+    player.obstacleSpeed = safeSpeed;
+    socket.to(code).emit("player-obstacles", {
+      id: socket.id, obstacles: safeObstacles, speed: safeSpeed
+    });
+  });
+
   socket.on("ready-next-race", ({ roomCode } = {}) => {
     const code = String(roomCode || "").toUpperCase();
     if (socket.data.roomCode !== code) return;
@@ -118,7 +141,7 @@ io.on("connection", socket => {
     if ([...room.players.keys()].every(id => room.ready.has(id))) {
       room.roundComplete = false;
       room.ready.clear();
-      for (const p of room.players.values()) { p.score = 0; p.alive = true; p.ready = false; p.jump = 0; p.running = true; }
+      for (const p of room.players.values()) { p.score = 0; p.alive = true; p.ready = false; p.jump = 0; p.running = true; p.obstacles = []; p.obstacleSpeed = 0; }
       io.to(code).emit("next-race-start", { players: roomPlayers(room) });
       broadcastRoom(code);
     }
@@ -134,7 +157,7 @@ io.on("connection", socket => {
       room.ready.delete(s.id);
       if (room.roundComplete && room.players.size > 0 && [...room.players.keys()].every(id => room.ready.has(id))) {
         room.roundComplete = false; room.ready.clear();
-        for (const p of room.players.values()) { p.score = 0; p.alive = true; p.ready = false; p.jump = 0; p.running = true; }
+        for (const p of room.players.values()) { p.score = 0; p.alive = true; p.ready = false; p.jump = 0; p.running = true; p.obstacles = []; p.obstacleSpeed = 0; }
         io.to(code).emit("next-race-start", { players: roomPlayers(room) });
       }
       if (room.players.size === 0) rooms.delete(code);
