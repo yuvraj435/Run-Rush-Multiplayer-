@@ -104,6 +104,7 @@
   let activeRoom = '';
   let currentPlayers = [];
   const remoteMotion = new Map();
+  const remoteObstacleStates = new Map();
   function showStatus(text) { statusEl.textContent = text; }
   function emitRoom(action) {
     if (!socket) { showStatus('Server connection unavailable'); roomInfoEl.textContent = 'Open this game from the hosted server URL, not as a downloaded file.'; return; }
@@ -142,6 +143,7 @@
     socket.on('next-race-start', data => {
       renderPlayers(data.players || []);
       remoteMotion.clear();
+      remoteObstacleStates.clear();
       reset();
       titleEl.textContent = 'Ready, runners!';
       roomInfoEl.textContent = 'Everyone is ready. The new race has started!';
@@ -161,6 +163,14 @@
       const p = currentPlayers.find(x => x.id === data.id);
       if (p) { p.score = Number(data.score) || p.score; }
     });
+    socket.on('player-obstacles', data => {
+      if (!data || !data.id) return;
+      remoteObstacleStates.set(data.id, {
+        obstacles: Array.isArray(data.obstacles) ? data.obstacles : [],
+        speed: Math.max(0, Math.min(20, Number(data.speed) || 0)),
+        receivedAt: performance.now()
+      });
+    });
   }
   function renderPlayers(players) {
     currentPlayers = players;
@@ -175,15 +185,21 @@
   }
   function showWaitingRoom(readyCount, total) {
     running = false; gameOver = true;
-    titleEl.textContent = 'Race finished!';
-    textEl.textContent = `Everyone has finished. ${readyCount} of ${total} players ready for the next race.`;
-    startBtn.textContent = 'Play Again';
-    startBtn.disabled = false;
+    const me = currentPlayers.find(p => p.id === (socket && socket.id));
+    const alreadyReady = !!(me && me.ready);
+    titleEl.textContent = alreadyReady ? 'You are ready!' : 'Race finished!';
+    textEl.textContent = alreadyReady
+      ? `You are ready. Waiting for the other ${Math.max(0, total - readyCount)} player(s) to press Play Again.`
+      : `${readyCount} of ${total} players ready for the next race.`;
+    startBtn.textContent = alreadyReady ? 'Ready ✓' : 'Play Again';
+    startBtn.disabled = alreadyReady;
     startBtn.onclick = () => {
+      if (alreadyReady || startBtn.disabled) return;
       if (socket && activeRoom) {
         startBtn.disabled = true;
-        titleEl.textContent = 'Waiting for everyone…';
-        textEl.textContent = 'You are ready! The next race starts when all players press Play Again.';
+        startBtn.textContent = 'Ready ✓';
+        titleEl.textContent = 'You are ready!';
+        textEl.textContent = 'Waiting for the other players. The next race starts when everyone is ready.';
         socket.emit('ready-next-race', { roomCode: activeRoom });
       } else {
         reset();
@@ -202,6 +218,17 @@
     socket.emit('player-motion', { roomCode: activeRoom, jump, running, score: Math.floor(score) });
   }
 
+  let lastObstacleSnapshotSent = 0;
+  function sendObstacleSnapshot(now) {
+    if (!socket || !activeRoom || !running || now - lastObstacleSnapshotSent < 100) return;
+    lastObstacleSnapshotSent = now;
+    socket.emit('player-obstacles', {
+      roomCode: activeRoom,
+      speed,
+      obstacles: obstacles.map(o => ({ id: o.id, x: o.x, y: o.y, w: o.w, h: o.h }))
+    });
+  }
+
   const canvas = document.getElementById('game');
   const scoreEl = document.getElementById('score');
   const bestEl = document.getElementById('best');
@@ -215,7 +242,7 @@
 
   // 3D neon circuit. Game scoring and collision calculations below remain the original rules.
   let scene, camera, renderer, worldClock;
-  let localRunner, remoteRunners = new Map(), obstacleMeshes = new Map();
+  let localRunner, remoteRunners = new Map(), obstacleMeshes = new Map(), remoteObstacleMeshes = new Map();
   let roadMarks = [], cityBlocks = [], threeReady = false;
   const runnerColors = [0x32f5ff, 0xff4de1, 0xa4ff4d, 0xffb347, 0x9d7bff, 0xff6688, 0x54ffd0, 0xffffff];
 
@@ -255,7 +282,7 @@
     }
     const aura = new THREE.PointLight(color, isLocal ? 1.1 : 0.55, 4);
     aura.position.set(0, 1.3, 0); group.add(aura);
-    group.userData = { arms, legs, isLocal };
+    group.userData = { arms, legs, isLocal, body };
     return group;
   }
 
@@ -350,7 +377,13 @@
       avatar.visible = true;
     });
     for (const [id, avatar] of remoteRunners) {
-      if (!visible.has(id)) { scene.remove(avatar); remoteRunners.delete(id); remoteMotion.delete(id); }
+      if (!visible.has(id)) {
+        scene.remove(avatar); remoteRunners.delete(id); remoteMotion.delete(id);
+        remoteObstacleStates.delete(id);
+        for (const [meshId, mesh] of remoteObstacleMeshes) {
+          if (meshId.startsWith(id + ':')) { scene.remove(mesh); remoteObstacleMeshes.delete(meshId); }
+        }
+      }
     }
   }
 
@@ -359,7 +392,10 @@
     const swing = isRunning ? Math.sin(time * 12) * 0.85 : 0;
     group.userData.legs.forEach((leg, i) => { leg.rotation.x = i === 0 ? swing : -swing; });
     group.userData.arms.forEach((arm, i) => { arm.rotation.x = i === 0 ? -swing * 0.75 : swing * 0.75; });
-
+    if (group.userData.body) {
+      group.userData.body.position.y = 1.18 + (isRunning ? Math.abs(Math.sin(time * 24)) * 0.075 : 0);
+    }
+    group.rotation.z = isRunning ? Math.sin(time * 12) * 0.025 : 0;
   }
 
   function localLaneX() {
@@ -384,13 +420,15 @@
     syncRemoteRunners();
     for (const p of currentPlayers) {
       const avatar = remoteRunners.get(p.id);
-      if (avatar) animateRunner(avatar, t + (p.lane || 0) * 0.2, p.alive !== false);
+      if (avatar) {
+        const motion = remoteMotion.get(p.id);
+        const remoteRunning = motion ? motion.running : !!p.running;
+        animateRunner(avatar, t + (p.lane || 0) * 0.2, remoteRunning && p.alive !== false);
+      }
     }
     const activeIds = new Set();
-    obstacles.forEach((o, i) => {
-      const id = o.id || (o.id = nextObstacleId++);
-      activeIds.add(id);
-      let mesh = obstacleMeshes.get(id);
+    function getObstacleMesh(map, key) {
+      let mesh = map.get(key);
       if (!mesh) {
         const group = new THREE.Group();
         const mat = new THREE.MeshStandardMaterial({ color: 0x291044, metalness: 0.5, roughness: 0.25, emissive: 0xff19d7, emissiveIntensity: 1.6 });
@@ -401,13 +439,41 @@
           const edge = new THREE.Mesh(new THREE.BoxGeometry(0.07, 1.48, 0.92), edgeMat);
           edge.position.set(x, 0.72, 0); group.add(edge);
         }
-        scene.add(group); mesh = group; obstacleMeshes.set(id, mesh);
+        scene.add(group); map.set(key, group); mesh = group;
       }
+      return mesh;
+    }
+    obstacles.forEach((o, i) => {
+      const id = o.id || (o.id = nextObstacleId++);
+      activeIds.add(id);
+      const mesh = getObstacleMesh(obstacleMeshes, id);
       mesh.position.set(localLaneX(), 0, 2 - (o.x - player.x) * 0.0435);
       mesh.rotation.y = Math.sin(t * 2 + i) * 0.04;
     });
     for (const [id, mesh] of obstacleMeshes) {
       if (!activeIds.has(id)) { scene.remove(mesh); obstacleMeshes.delete(id); }
+    }
+
+    const activeRemoteIds = new Set();
+    for (const p of currentPlayers) {
+      if (p.id === (socket && socket.id)) continue;
+      const snapshot = remoteObstacleStates.get(p.id);
+      if (!snapshot) continue;
+      const lane = Number.isFinite(p.lane) ? p.lane : 0;
+      const laneX = (lane - (currentPlayers.length - 1) / 2) * 1.65;
+      const elapsedFrames = Math.max(0, (performance.now() - snapshot.receivedAt) / (1000 / 60));
+      snapshot.obstacles.forEach((o, i) => {
+        const x = Number(o.x) - snapshot.speed * elapsedFrames;
+        if (!Number.isFinite(x) || x + Number(o.w || 0) < -10) return;
+        const key = `${p.id}:${o.id}`;
+        activeRemoteIds.add(key);
+        const mesh = getObstacleMesh(remoteObstacleMeshes, key);
+        mesh.position.set(laneX, 0, 2 - (x - player.x) * 0.0435);
+        mesh.rotation.y = Math.sin(t * 2 + i + lane) * 0.04;
+      });
+    }
+    for (const [id, mesh] of remoteObstacleMeshes) {
+      if (!activeRemoteIds.has(id)) { scene.remove(mesh); remoteObstacleMeshes.delete(id); }
     }
     renderer.render(scene, camera);
   }
@@ -429,7 +495,10 @@
     obstacles.push({ id: nextObstacleId++, x: W + 20, y: ground - h, w, h });
   }
   function reset() {
-    score=0; speed=6; frame=0; lastObstacleFrame=0; obstacles=[]; nextObstacleId=1; for (const mesh of obstacleMeshes.values()) scene && scene.remove(mesh); obstacleMeshes.clear(); particles=[]; startBtn.disabled=false; startBtn.textContent='Start running'; startBtn.onclick=null;
+    score=0; speed=6; frame=0; lastObstacleFrame=0; obstacles=[]; nextObstacleId=1;
+    for (const mesh of obstacleMeshes.values()) scene && scene.remove(mesh); obstacleMeshes.clear();
+    for (const mesh of remoteObstacleMeshes.values()) scene && scene.remove(mesh); remoteObstacleMeshes.clear();
+    remoteObstacleStates.clear(); lastObstacleSnapshotSent=0; particles=[]; startBtn.disabled=false; startBtn.textContent='Start running'; startBtn.onclick=null;
     player.y=ground-player.h; player.vy=0; player.onGround=true;
     scoreEl.textContent='0'; gameOver=false; running=true;
     if (socket && activeRoom) socket.emit('player-motion', { roomCode: activeRoom, jump: 0, running: true, score: 0 });
@@ -447,7 +516,10 @@
   function burst(x,y,n) { for(let i=0;i<n;i++) particles.push({x,y,vx:(Math.random()-.5)*4,vy:-Math.random()*3,life:20+Math.random()*10}); }
   function endGame() {
     running=false; gameOver=true; reportState(score,false);
-    if (socket && activeRoom) socket.emit('player-motion', { roomCode: activeRoom, jump: 0, running: false, score: Math.floor(score) });
+    if (socket && activeRoom) {
+      socket.emit('player-motion', { roomCode: activeRoom, jump: 0, running: false, score: Math.floor(score) });
+      socket.emit('player-obstacles', { roomCode: activeRoom, speed: 0, obstacles: [] });
+    }
     best=Math.max(best,Math.floor(score));
     bestEl.textContent=best;
     try { localStorage.setItem('runrush-best',best); } catch(e) {}
@@ -505,6 +577,7 @@
       particles.forEach(p=>{p.x+=p.vx*delta;p.y+=p.vy*delta;p.vy+=.12*delta;p.life-=delta;});
       particles=particles.filter(p=>p.life>0);
     }
+    sendObstacleSnapshot(timestamp);
     if (threeReady) renderThree();
     requestAnimationFrame(loop);
   }
