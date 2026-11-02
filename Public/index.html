@@ -105,6 +105,8 @@
   let currentPlayers = [];
   const remoteMotion = new Map();
   const remoteObstacleStates = new Map();
+  const remoteJumpVisual = new Map();
+  const remoteObstacleVisualX = new Map();
   function showStatus(text) { statusEl.textContent = text; }
   function emitRoom(action) {
     if (!socket) { showStatus('Server connection unavailable'); roomInfoEl.textContent = 'Open this game from the hosted server URL, not as a downloaded file.'; return; }
@@ -144,6 +146,8 @@
       renderPlayers(data.players || []);
       remoteMotion.clear();
       remoteObstacleStates.clear();
+      remoteJumpVisual.clear();
+      remoteObstacleVisualX.clear();
       reset();
       titleEl.textContent = 'Ready, runners!';
       roomInfoEl.textContent = 'Everyone is ready. The new race has started!';
@@ -212,7 +216,7 @@
   };
   let lastMotionSent = 0;
   function sendMotion(now) {
-    if (!socket || !activeRoom || !running || now - lastMotionSent < 100) return;
+    if (!socket || !activeRoom || !running || now - lastMotionSent < 50) return;
     lastMotionSent = now;
     const jump = Math.max(0, Math.min(1, (ground - player.h - player.y) / 110));
     socket.emit('player-motion', { roomCode: activeRoom, jump, running, score: Math.floor(score) });
@@ -220,7 +224,7 @@
 
   let lastObstacleSnapshotSent = 0;
   function sendObstacleSnapshot(now) {
-    if (!socket || !activeRoom || !running || now - lastObstacleSnapshotSent < 100) return;
+    if (!socket || !activeRoom || !running || now - lastObstacleSnapshotSent < 50) return;
     lastObstacleSnapshotSent = now;
     socket.emit('player-obstacles', {
       roomCode: activeRoom,
@@ -372,14 +376,18 @@
       const laneX = (lane - (currentPlayers.length - 1) / 2) * 1.65;
       avatar.position.x = laneX;
       const motion = remoteMotion.get(p.id);
-      const jump = motion ? motion.jump : (p.jump || 0);
-      avatar.position.y = jump * 2.1;
+      const targetJump = motion ? motion.jump : (p.jump || 0);
+      const previousJump = remoteJumpVisual.has(p.id) ? remoteJumpVisual.get(p.id) : targetJump;
+      const jumpBlend = 1 - Math.pow(0.72, Math.max(0.25, delta));
+      const smoothJump = previousJump + (targetJump - previousJump) * jumpBlend;
+      remoteJumpVisual.set(p.id, smoothJump);
+      avatar.position.y = smoothJump * 2.1;
       avatar.visible = true;
     });
     for (const [id, avatar] of remoteRunners) {
       if (!visible.has(id)) {
         scene.remove(avatar); remoteRunners.delete(id); remoteMotion.delete(id);
-        remoteObstacleStates.delete(id);
+        remoteObstacleStates.delete(id); remoteJumpVisual.delete(id);
         for (const [meshId, mesh] of remoteObstacleMeshes) {
           if (meshId.startsWith(id + ':')) { scene.remove(mesh); remoteObstacleMeshes.delete(meshId); }
         }
@@ -467,13 +475,19 @@
         if (!Number.isFinite(x) || x + Number(o.w || 0) < -10) return;
         const key = `${p.id}:${o.id}`;
         activeRemoteIds.add(key);
+        const previousX = remoteObstacleVisualX.has(key) ? remoteObstacleVisualX.get(key) : x;
+        const obstacleBlend = 1 - Math.pow(0.72, Math.max(0.25, delta));
+        const smoothX = previousX + (x - previousX) * obstacleBlend;
+        remoteObstacleVisualX.set(key, smoothX);
         const mesh = getObstacleMesh(remoteObstacleMeshes, key);
-        mesh.position.set(laneX, 0, 2 - (x - player.x) * 0.0435);
+        mesh.position.set(laneX, 0, 2 - (smoothX - player.x) * 0.0435);
         mesh.rotation.y = Math.sin(t * 2 + i + lane) * 0.04;
       });
     }
     for (const [id, mesh] of remoteObstacleMeshes) {
-      if (!activeRemoteIds.has(id)) { scene.remove(mesh); remoteObstacleMeshes.delete(id); }
+      if (!activeRemoteIds.has(id)) {
+        scene.remove(mesh); remoteObstacleMeshes.delete(id); remoteObstacleVisualX.delete(id);
+      }
     }
     renderer.render(scene, camera);
   }
@@ -498,7 +512,7 @@
     score=0; speed=6; frame=0; lastObstacleFrame=0; obstacles=[]; nextObstacleId=1;
     for (const mesh of obstacleMeshes.values()) scene && scene.remove(mesh); obstacleMeshes.clear();
     for (const mesh of remoteObstacleMeshes.values()) scene && scene.remove(mesh); remoteObstacleMeshes.clear();
-    remoteObstacleStates.clear(); lastObstacleSnapshotSent=0; particles=[]; startBtn.disabled=false; startBtn.textContent='Start running'; startBtn.onclick=null;
+    remoteObstacleStates.clear(); remoteJumpVisual.clear(); remoteObstacleVisualX.clear(); lastObstacleSnapshotSent=0; particles=[]; startBtn.disabled=false; startBtn.textContent='Start running'; startBtn.onclick=null;
     player.y=ground-player.h; player.vy=0; player.onGround=true;
     scoreEl.textContent='0'; gameOver=false; running=true;
     if (socket && activeRoom) socket.emit('player-motion', { roomCode: activeRoom, jump: 0, running: true, score: 0 });
