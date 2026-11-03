@@ -302,16 +302,15 @@
       camera = new THREE.PerspectiveCamera(55, 2, 0.1, 120);
       camera.position.set(0, 8.5, 13.5);
       camera.lookAt(0, 1.0, -8);
-      renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+      renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.0));
       renderer.setSize(canvas.clientWidth || 960, canvas.clientHeight || 480, false);
-      renderer.shadowMap.enabled = true;
-      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      renderer.shadowMap.enabled = false;
       worldClock = new THREE.Clock();
 
       scene.add(new THREE.HemisphereLight(0x9ecbff, 0x111020, 1.35));
       const key = new THREE.DirectionalLight(0xffffff, 2.0);
-      key.position.set(-5, 12, 7); key.castShadow = true; scene.add(key);
+      key.position.set(-5, 12, 7); key.castShadow = false; scene.add(key);
       const cyanLight = new THREE.PointLight(0x00dfff, 24, 32); cyanLight.position.set(-7, 5, -10); scene.add(cyanLight);
       const pinkLight = new THREE.PointLight(0xff19cf, 18, 28); pinkLight.position.set(8, 4, -18); scene.add(pinkLight);
 
@@ -378,7 +377,7 @@
       const motion = remoteMotion.get(p.id);
       const targetJump = motion ? motion.jump : (p.jump || 0);
       const previousJump = remoteJumpVisual.has(p.id) ? remoteJumpVisual.get(p.id) : targetJump;
-      const jumpBlend = 1 - Math.pow(0.72, Math.max(0.25, delta));
+      const jumpBlend = 1 - Math.pow(0.58, Math.max(0.25, delta));
       const smoothJump = previousJump + (targetJump - previousJump) * jumpBlend;
       remoteJumpVisual.set(p.id, smoothJump);
       avatar.position.y = smoothJump * 2.1;
@@ -476,7 +475,7 @@
         const key = `${p.id}:${o.id}`;
         activeRemoteIds.add(key);
         const previousX = remoteObstacleVisualX.has(key) ? remoteObstacleVisualX.get(key) : x;
-        const obstacleBlend = 1 - Math.pow(0.72, Math.max(0.25, delta));
+        const obstacleBlend = 1 - Math.pow(0.58, Math.max(0.25, delta));
         const smoothX = previousX + (x - previousX) * obstacleBlend;
         remoteObstacleVisualX.set(key, smoothX);
         const mesh = getObstacleMesh(remoteObstacleMeshes, key);
