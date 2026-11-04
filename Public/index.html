@@ -49,9 +49,118 @@
   .below { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; padding:15px 4px 0; color:var(--muted); font-size:.9rem; }
   .jump { color:var(--ink); background:#ffffff12; border:1px solid #ffffff20; border-radius:12px; padding:9px 13px; }
   @media(max-width:520px) { body{padding:12px} header{align-items:flex-start;flex-direction:column}.scorebox{width:100%}.pill{flex:1} canvas{aspect-ratio:4/3} .below{font-size:.82rem} }
+
+
+/* RUN RUSH platform shell */
+.platform-layer{position:fixed;inset:0;z-index:50;overflow:auto;padding:22px 14px;background:radial-gradient(circle at 15% 0%,#263b68 0,#11172a 48%,#080c17 100%);color:#f6f7fb;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+.platform-inner{width:min(980px,100%);margin:0 auto}
+.platform-brand{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:24px}
+.platform-logo{font-weight:1000;letter-spacing:-.055em;font-size:clamp(2rem,7vw,3.3rem);line-height:1}.platform-logo span{color:#76f7c5;text-shadow:0 0 22px #36e9bd66}
+.platform-tag{font-size:.72rem;letter-spacing:.18em;color:#aeb8d0;font-weight:800;margin-top:7px}
+.platform-card{background:#141b30d9;border:1px solid #ffffff20;border-radius:24px;padding:clamp(18px,4vw,30px);box-shadow:0 24px 80px #0005}
+.platform-hero{display:grid;grid-template-columns:1.1fr .9fr;gap:24px;align-items:center;min-height:390px}
+.platform-kicker{color:#76f7c5;font-size:.72rem;letter-spacing:.17em;font-weight:900;text-transform:uppercase}
+.platform-h1{font-size:clamp(2rem,6vw,3.5rem);line-height:1.04;letter-spacing:-.05em;margin:10px 0}
+.platform-copy{color:#b9c5dc;line-height:1.6;max-width:480px}
+.platform-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:22px}
+.platform-btn{border:0;border-radius:14px;padding:13px 18px;font:inherit;font-weight:850;cursor:pointer;background:#76f7c5;color:#092018;box-shadow:0 5px 0 #39b98d}
+.platform-btn.secondary{background:#ffffff12;color:#f6f7fb;border:1px solid #ffffff2b;box-shadow:none}
+.platform-btn:disabled{opacity:.5;cursor:not-allowed}
+.platform-art{min-height:260px;border-radius:20px;position:relative;overflow:hidden;background:radial-gradient(circle at 50% 42%,#1c5473 0,#152345 48%,#10172c 100%);display:grid;place-items:center;border:1px solid #ffffff20}
+.platform-orb{width:170px;height:170px;border-radius:50%;display:grid;place-items:center;font-size:6rem;background:radial-gradient(circle at 30% 25%,#ffffff,#75f7d0 18%,#087d99 55%,#18234b 75%);box-shadow:0 0 35px #21dffb99,0 0 90px #ed42df55;animation:rrfloat 4s ease-in-out infinite}
+.platform-orb:after{content:'';position:absolute;width:235px;height:70px;border:3px solid #76f7c5;border-radius:50%;transform:rotate(-24deg);box-shadow:0 0 18px #76f7c5}
+@keyframes rrfloat{50%{transform:translateY(-10px) rotate(4deg)}}
+.platform-screen{display:none}.platform-screen.active{display:block}
+.platform-topline{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:18px}
+.platform-title{font-size:clamp(1.6rem,4vw,2.3rem);font-weight:950;letter-spacing:-.04em;margin:0}
+.platform-muted{color:#aeb8d0;font-size:.9rem}
+.profile-strip{display:flex;align-items:center;gap:13px;padding:15px;border-radius:18px;background:#ffffff0d;border:1px solid #ffffff18;margin-bottom:20px}
+.profile-avatar{width:54px;height:54px;border-radius:17px;display:grid;place-items:center;font-size:2rem;background:linear-gradient(135deg,#314e80,#693e84);border:1px solid #ffffff35}
+.profile-name{font-weight:900}.profile-sub{font-size:.78rem;color:#aeb8d0;margin-top:3px}
+.mode-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}
+.mode-card{min-height:145px;border-radius:20px;padding:17px;text-align:left;color:white;border:1px solid #ffffff22;cursor:pointer;display:flex;flex-direction:column;justify-content:space-between;box-shadow:inset 0 1px #ffffff12;transition:transform .15s,filter .15s}
+.mode-card:active{transform:scale(.98)}.mode-card .mode-icon{font-size:2rem}.mode-card strong{font-size:1.1rem}.mode-card small{color:#e3e9f5;font-size:.8rem;margin-top:4px}
+.mode-run{background:linear-gradient(140deg,#174e75,#18315c)}.mode-brain{background:linear-gradient(140deg,#17634e,#193f47)}.mode-meme{background:linear-gradient(140deg,#67386c,#3d315f)}.mode-fun{background:linear-gradient(140deg,#895020,#543a37)}
+.mode-card.coming{cursor:default;filter:saturate(.78)}
+.mode-card .coming-label{font-size:.65rem;letter-spacing:.1em;text-transform:uppercase;color:#ffe5a3;font-weight:900}
+.platform-nav{display:flex;justify-content:space-around;gap:8px;margin-top:20px;padding:12px 5px;border-top:1px solid #ffffff20;color:#b9c5dc}
+.platform-nav button{background:transparent;color:inherit;box-shadow:none;padding:8px 10px;font-size:.8rem}
+.platform-form{display:grid;gap:13px;max-width:520px}.platform-form label{font-size:.85rem;font-weight:800}.platform-form input{display:block;width:100%;margin-top:7px;padding:13px 14px;border-radius:12px;border:1px solid #ffffff2b;background:#0b1224;color:#fff;font:inherit;outline:none}.avatar-choices{display:flex;gap:10px;flex-wrap:wrap}.avatar-choice{background:#ffffff0c;border:1px solid #ffffff28;border-radius:14px;padding:10px 14px;color:white;cursor:pointer}.avatar-choice.selected{border-color:#76f7c5;background:#76f7c51a;box-shadow:0 0 0 1px #76f7c5}.platform-note{font-size:.78rem;color:#aeb8d0;line-height:1.5}.platform-back{background:transparent;color:#cbd5e1;box-shadow:none;padding:8px 0}
+@media(max-width:680px){.platform-hero{grid-template-columns:1fr}.platform-art{min-height:190px;order:-1}.platform-orb{width:125px;height:125px;font-size:4.5rem}.platform-orb:after{width:180px;height:55px}.platform-card{border-radius:20px}.platform-layer{padding:15px 11px}.mode-card{min-height:130px;padding:14px}}
+
 </style>
 </head>
 <body>
+
+<div class="platform-layer" id="platformLayer">
+  <div class="platform-inner">
+    <header class="platform-brand">
+      <div><div class="platform-logo">RUN <span>RUSH</span></div><div class="platform-tag">PLAY · LEARN · LAUGH · COMPETE</div></div>
+      <div id="platformHeaderProfile" class="platform-muted">YOUR GAME UNIVERSE</div>
+    </header>
+    <section class="platform-screen active" id="welcomeScreen">
+      <div class="platform-card platform-hero">
+        <div>
+          <div class="platform-kicker">A new kind of game hub</div>
+          <h1 class="platform-h1">Ready to enter<br>the <span style="color:#76f7c5">rush?</span></h1>
+          <p class="platform-copy">Race your friends, test what you know, discover memes and jump into quick mini-games. One world, many ways to play.</p>
+          <div class="platform-actions">
+            <button class="platform-btn" id="guestStartBtn">Play as guest</button>
+            <button class="platform-btn secondary" id="accountStartBtn">Create account</button>
+          </div>
+          <p class="platform-note" style="margin-top:15px">Guest play starts right away. Account registration and cloud-saved profiles will be connected in the next development phase.</p>
+        </div>
+        <div class="platform-art"><div class="platform-orb">🏃</div></div>
+      </div>
+    </section>
+    <section class="platform-screen" id="guestSetupScreen">
+      <div class="platform-card">
+        <div class="platform-topline"><div><div class="platform-kicker">Guest profile</div><h2 class="platform-title">Make it yours</h2></div><button class="platform-back" data-back="welcomeScreen">← Back</button></div>
+        <div class="platform-form">
+          <label for="guestNameInput">Choose a display name</label>
+          <input id="guestNameInput" maxlength="16" autocomplete="nickname" placeholder="e.g. NeonRunner" value="Runner">
+          <div><label>Choose your avatar style</label><div class="avatar-choices" style="margin-top:9px">
+            <button type="button" class="avatar-choice selected" data-avatar="🦊">🦊 Cartoon</button>
+            <button type="button" class="avatar-choice" data-avatar="🤖">🤖 Futuristic</button>
+            <button type="button" class="avatar-choice" data-avatar="🐼">🐼 Cartoon</button>
+            <button type="button" class="avatar-choice" data-avatar="👾">👾 Futuristic</button>
+          </div></div>
+          <p class="platform-note">Guest profile progress is stored on this device only for now. A guest name is not reserved globally until the account system is connected.</p>
+          <button class="platform-btn" id="enterPlatformBtn">Enter RUN RUSH →</button>
+        </div>
+      </div>
+    </section>
+    <section class="platform-screen" id="accountInfoScreen">
+      <div class="platform-card">
+        <div class="platform-topline"><div><div class="platform-kicker">Player account</div><h2 class="platform-title">Your progress, everywhere</h2></div><button class="platform-back" data-back="welcomeScreen">← Back</button></div>
+        <p class="platform-copy">Registered accounts will let players reserve a unique username, keep records across devices, manage friends and carry their profile through every RUN RUSH game mode.</p>
+        <div class="profile-strip" style="margin-top:18px"><div class="profile-avatar">🔐</div><div><div class="profile-name">Secure registration is next</div><div class="profile-sub">We won't ask for a password until secure account storage is connected.</div></div></div>
+        <button class="platform-btn" data-back="guestSetupScreen">Try guest play first</button>
+      </div>
+    </section>
+    <section class="platform-screen" id="homeScreen">
+      <div class="platform-topline"><div><div class="platform-kicker">Welcome back</div><h2 class="platform-title">Choose your rush!</h2></div><button class="platform-btn secondary" id="switchProfileBtn">Profile</button></div>
+      <div class="profile-strip"><div class="profile-avatar" id="homeAvatar">🦊</div><div style="flex:1;min-width:0"><div class="profile-name" id="homeName">Runner</div><div class="profile-sub">Guest player · This device</div></div><div style="text-align:right"><div class="platform-muted" style="font-size:.7rem">LEVEL</div><strong>1</strong></div></div>
+      <div class="platform-kicker" style="margin-bottom:11px">Choose a game mode</div>
+      <div class="mode-grid">
+        <button class="mode-card mode-run" id="openRunMode"><span class="mode-icon">⚡</span><span><strong>RUN MODE</strong><br><small>Race, jump and survive</small></span></button>
+        <button class="mode-card mode-brain coming" type="button"><span class="mode-icon">🧠</span><span><strong>BRAIN RUSH</strong><br><small>Grade-based quizzes</small></span><span class="coming-label">Coming soon</span></button>
+        <button class="mode-card mode-meme coming" type="button"><span class="mode-icon">😂</span><span><strong>MEME RUSH</strong><br><small>Memes and funny challenges</small></span><span class="coming-label">Coming soon</span></button>
+        <button class="mode-card mode-fun coming" type="button"><span class="mode-icon">🎮</span><span><strong>FUN RUSH</strong><br><small>Quick party mini-games</small></span><span class="coming-label">Coming soon</span></button>
+      </div>
+      <div class="platform-card" style="margin-top:15px;padding:17px"><div class="platform-kicker">Daily rush</div><strong style="display:block;margin-top:5px">A fresh challenge is on the way</strong><div class="platform-muted" style="font-size:.82rem;margin-top:4px">Daily quests and achievements will arrive in a future update.</div></div>
+      <nav class="platform-nav"><button type="button" id="navHome">⌂ Home</button><button type="button" id="navFriends" title="Coming soon">♧ Friends</button><button type="button" id="navLeaderboard" title="Coming soon">🏆 Leaderboard</button><button type="button" id="navProfile">☺ Profile</button></nav>
+    </section>
+    <section class="platform-screen" id="profileScreen">
+      <div class="platform-card"><div class="platform-topline"><div><div class="platform-kicker">Player profile</div><h2 class="platform-title">Your rush identity</h2></div><button class="platform-back" data-back="homeScreen">← Home</button></div>
+        <div class="profile-strip"><div class="profile-avatar" id="profileAvatar">🦊</div><div><div class="profile-name" id="profileName">Runner</div><div class="profile-sub">Guest · Local profile</div></div></div>
+        <div class="platform-muted">RUN MODE records will appear here. Account sync, achievements, friends and cross-device progress are planned for upcoming releases.</div>
+        <button class="platform-btn secondary" id="returnHomeBtn" style="margin-top:18px">Back to home</button>
+      </div>
+    </section>
+  </div>
+</div>
+
 <main class="wrap">
   <header>
     <div><div class="eyebrow">A tiny arcade game</div><h1>RUN <span style="color:var(--accent)">RUSH</span></h1></div>
@@ -598,5 +707,65 @@
   requestAnimationFrame(loop);
 })();
 </script>
+
+<script>
+(() => {
+  const layer = document.getElementById('platformLayer');
+  if (!layer) return;
+  const screens = [...layer.querySelectorAll('.platform-screen')];
+  let selectedAvatar = '🦊';
+  function showScreen(id) { screens.forEach(s => s.classList.toggle('active', s.id === id)); }
+  function setProfile(name, avatar) {
+    const safeName = (name || 'Runner').trim().replace(/[<>]/g,'').slice(0,16) || 'Runner';
+    const profile = { name: safeName, avatar: avatar || '🦊', kind: 'guest', createdAt: Date.now() };
+    try { localStorage.setItem('rr-guest-profile', JSON.stringify(profile)); } catch(e) {}
+    document.getElementById('homeName').textContent = safeName;
+    document.getElementById('profileName').textContent = safeName;
+    document.getElementById('homeAvatar').textContent = profile.avatar;
+    document.getElementById('profileAvatar').textContent = profile.avatar;
+    const oldName = document.getElementById('playerName');
+    if (oldName) oldName.value = safeName;
+    return profile;
+  }
+  document.getElementById('guestStartBtn').addEventListener('click', () => showScreen('guestSetupScreen'));
+  document.getElementById('accountStartBtn').addEventListener('click', () => showScreen('accountInfoScreen'));
+  document.querySelectorAll('[data-back]').forEach(b => b.addEventListener('click', () => showScreen(b.dataset.back)));
+  document.querySelectorAll('[data-avatar]').forEach(b => b.addEventListener('click', () => {
+    selectedAvatar = b.dataset.avatar;
+    document.querySelectorAll('[data-avatar]').forEach(x => x.classList.toggle('selected', x === b));
+  }));
+  document.getElementById('enterPlatformBtn').addEventListener('click', () => {
+    const name = document.getElementById('guestNameInput').value;
+    if (!name.trim()) { document.getElementById('guestNameInput').focus(); return; }
+    setProfile(name, selectedAvatar);
+    showScreen('homeScreen');
+  });
+  document.getElementById('switchProfileBtn').addEventListener('click', () => showScreen('profileScreen'));
+  document.getElementById('navProfile').addEventListener('click', () => showScreen('profileScreen'));
+  document.getElementById('navHome').addEventListener('click', () => showScreen('homeScreen'));
+  document.getElementById('returnHomeBtn').addEventListener('click', () => showScreen('homeScreen'));
+  document.getElementById('navFriends').addEventListener('click', () => alert('Friends is planned for a future update.'));
+  document.getElementById('navLeaderboard').addEventListener('click', () => alert('Leaderboards are planned for a future update.'));
+  document.getElementById('openRunMode').addEventListener('click', () => { layer.style.display = 'none'; });
+  // Keep the existing game available, with a way back to the platform home.
+  const gameHeader = document.querySelector('.wrap header');
+  if (gameHeader) {
+    const homeBtn = document.createElement('button');
+    homeBtn.type = 'button'; homeBtn.className = 'small-btn secondary'; homeBtn.textContent = '← RUN RUSH Home';
+    homeBtn.style.marginLeft = 'auto';
+    homeBtn.addEventListener('click', () => { layer.style.display = 'block'; showScreen('homeScreen'); });
+    gameHeader.appendChild(homeBtn);
+  }
+  try {
+    const saved = JSON.parse(localStorage.getItem('rr-guest-profile') || 'null');
+    if (saved && saved.kind === 'guest' && saved.name) {
+      document.getElementById('guestNameInput').value = saved.name;
+      selectedAvatar = saved.avatar || '🦊';
+      document.querySelectorAll('[data-avatar]').forEach(b => b.classList.toggle('selected', b.dataset.avatar === selectedAvatar));
+    }
+  } catch(e) {}
+})();
+</script>
+
 </body>
 </html>
